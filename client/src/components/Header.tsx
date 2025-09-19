@@ -143,7 +143,10 @@ export default function Header({ pages, currentPageId }: HeaderProps) {
             size="sm"
             variant="secondary"
             className="w-10 h-10 rounded-lg"
-            onClick={openAdminModal}
+            onClick={() => {
+              console.log('Admin button clicked!');
+              openAdminModal();
+            }}
             data-testid="button-admin"
           >
             {isAdmin ? <Settings className="w-4 h-4" /> : <User className="w-4 h-4" />}

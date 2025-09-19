@@ -23,11 +23,12 @@ export function useAdmin() {
   };
 
   const openAdminModal = () => {
-    if (isAdmin) {
-      // If already admin, show logout confirmation or admin panel
-      logout();
-    } else {
+    console.log('openAdminModal called, isAdmin:', isAdmin);
+    if (!isAdmin) {
+      console.log('Setting modal open to true');
       setIsAdminModalOpen(true);
+    } else {
+      console.log('User is already admin, not opening modal');
     }
   };
 

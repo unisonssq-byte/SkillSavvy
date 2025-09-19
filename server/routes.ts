@@ -547,5 +547,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Reorder media within a block
+  app.patch('/api/blocks/:blockId/media/reorder', verifyAdmin, async (req, res) => {
+    try {
+      const { blockId } = req.params;
+      const { mediaOrderUpdates } = req.body; // Array of { id: string, order: number }
+      
+      if (!Array.isArray(mediaOrderUpdates)) {
+        return res.status(400).json({ message: 'mediaOrderUpdates must be an array' });
+      }
+
+      const updatedMedia = await storage.reorderMedia(blockId, mediaOrderUpdates);
+      
+      // Broadcast media reorder
+      broadcastToAll({
+        type: 'MEDIA_REORDERED',
+        payload: { blockId, media: updatedMedia },
+      });
+      
+      res.json(updatedMedia);
+    } catch (error) {
+      console.error('Media reorder error:', error);
+      res.status(500).json({ message: 'Failed to reorder media' });
+    }
+  });
+
   return httpServer;
 }

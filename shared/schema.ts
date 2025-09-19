@@ -42,6 +42,7 @@ export const media = pgTable("media", {
   size: integer("size").notNull(),
   url: text("url").notNull(),
   thumbnailUrl: text("thumbnail_url"),
+  order: integer("order").default(0),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

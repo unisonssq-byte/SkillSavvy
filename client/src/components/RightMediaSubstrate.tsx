@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import React, { useState, useRef, useCallback } from "react";
 import { useAdmin } from "@/hooks/useAdmin";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -9,6 +9,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import ContextMenu, { useContextMenu } from "@/components/ContextMenu";
 import { PendingChangesIndicator } from "@/components/PendingChangesIndicator";
 import type { Block, Media } from "@shared/schema";
+import { motion, Reorder } from "framer-motion";
 
 interface RightMediaSubstrateProps {
   block: Block;
@@ -24,13 +25,20 @@ export default function RightMediaSubstrate({ block, index, isAdmin, allMediaBlo
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [mediaToDelete, setMediaToDelete] = useState<Media | null>(null);
-  const [draggedMediaId, setDraggedMediaId] = useState<string | null>(null);
+  const [mediaOrder, setMediaOrder] = useState<Media[]>([]);
   const { contextMenu, showContextMenu, hideContextMenu } = useContextMenu();
 
   // Fetch media for this block
   const { data: media = [] } = useQuery<Media[]>({
     queryKey: ["/api/blocks", block.id, "media"],
   });
+
+  // Update media order when media data changes (using JSON.stringify for stable comparison)
+  React.useEffect(() => {
+    if (media.length >= 0) {
+      setMediaOrder(media);
+    }
+  }, [JSON.stringify(media)]);
 
   const uploadMediaMutation = useMutation({
     mutationFn: async (file: File) => {
@@ -88,6 +96,32 @@ export default function RightMediaSubstrate({ block, index, isAdmin, allMediaBlo
     },
   });
 
+  const reorderMediaMutation = useMutation({
+    mutationFn: async (newMediaOrder: Media[]) => {
+      const mediaOrderUpdates = newMediaOrder.map((mediaItem, index) => ({
+        id: mediaItem.id,
+        order: index,
+      }));
+      
+      return await apiRequest("PATCH", `/api/blocks/${block.id}/media/reorder`, {
+        mediaOrderUpdates,
+      });
+    },
+    onSuccess: () => {
+      toast({
+        title: "Media reordered",
+        description: "Media order has been updated successfully.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to reorder media. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -108,31 +142,36 @@ export default function RightMediaSubstrate({ block, index, isAdmin, allMediaBlo
     }
   };
 
-  const handleMediaDragStart = (e: React.DragEvent, mediaId: string) => {
-    setDraggedMediaId(mediaId);
-    e.dataTransfer.setData('text/plain', mediaId);
-    e.dataTransfer.effectAllowed = 'move';
-  };
-
-  const handleMediaDragEnd = () => {
-    setDraggedMediaId(null);
-  };
-
-  const handleMediaDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    // Future implementation for media reordering
-  };
-
-  const handleMediaDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-  };
+  // Note: Old drag handlers removed - now using framer-motion Reorder component
 
   const handleMediaContextMenu = (e: React.MouseEvent, media: Media) => {
     if (isAdmin) {
       showContextMenu(e);
       setMediaToDelete(media);
     }
+  };
+
+  // Debounced commit to prevent excessive API calls during drag
+  const debouncedCommit = useCallback(
+    React.useMemo(() => {
+      let timeoutId: NodeJS.Timeout;
+      return (newOrder: Media[]) => {
+        if (timeoutId) clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+          if (isAdmin) {
+            reorderMediaMutation.mutate(newOrder);
+          }
+        }, 500); // Commit 500ms after drag stops
+      };
+    }, [isAdmin, reorderMediaMutation]),
+    [isAdmin, reorderMediaMutation]
+  );
+
+  const handleReorder = (newOrder: Media[]) => {
+    // Update local state immediately for smooth UX
+    setMediaOrder(newOrder);
+    // Debounced commit to server
+    debouncedCommit(newOrder);
   };
 
   // Navigation between media blocks
@@ -154,17 +193,10 @@ export default function RightMediaSubstrate({ block, index, isAdmin, allMediaBlo
   };
 
   const renderMediaItem = (item: Media) => {
-    const isDragging = draggedMediaId === item.id;
-    
     return (
       <div 
         key={item.id} 
-        className={`relative group bg-card rounded-lg p-4 border hover-lift ${isDragging ? 'opacity-50' : ''}`}
-        draggable={isAdmin}
-        onDragStart={(e) => handleMediaDragStart(e, item.id)}
-        onDragEnd={handleMediaDragEnd}
-        onDrop={handleMediaDrop}
-        onDragOver={handleMediaDragOver}
+        className="relative group bg-card rounded-lg p-4 border hover-lift"
         onContextMenu={(e) => handleMediaContextMenu(e, item)}
         data-testid={`media-item-${item.id}`}
       >
@@ -298,10 +330,26 @@ export default function RightMediaSubstrate({ block, index, isAdmin, allMediaBlo
 
         {/* Media Grid */}
         <div className="flex-1 overflow-y-auto p-4">
-          {media.length > 0 ? (
-            <div className="space-y-4">
-              {media.map(renderMediaItem)}
-            </div>
+          {mediaOrder.length > 0 ? (
+            <Reorder.Group
+              axis="y"
+              values={mediaOrder}
+              onReorder={handleReorder}
+              className="space-y-4"
+            >
+              {mediaOrder.map((item) => (
+                <Reorder.Item
+                  key={item.id}
+                  value={item}
+                  dragListener={isAdmin}
+                  className="cursor-pointer"
+                  whileDrag={{ scale: 1.02, opacity: 0.9 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  {renderMediaItem(item)}
+                </Reorder.Item>
+              ))}
+            </Reorder.Group>
           ) : (
             <div className="flex flex-col items-center justify-center h-32 text-center">
               <div className="text-muted-foreground text-sm">

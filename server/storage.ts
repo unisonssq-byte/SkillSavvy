@@ -258,7 +258,9 @@ export class DatabaseStorage implements IStorage {
 
   // Media operations
   async getMediaByBlockId(blockId: string): Promise<Media[]> {
-    return await db.select().from(media).where(eq(media.blockId, blockId));
+    return await db.select().from(media)
+      .where(eq(media.blockId, blockId))
+      .orderBy(media.order, media.createdAt);
   }
 
   async createMedia(insertMedia: InsertMedia, tx?: any): Promise<Media> {
@@ -271,6 +273,59 @@ export class DatabaseStorage implements IStorage {
     const dbContext = tx || db;
     const result = await dbContext.delete(media).where(eq(media.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  async updateMediaOrder(id: string, newOrder: number, tx?: any): Promise<Media | undefined> {
+    const dbContext = tx || db;
+    const [mediaItem] = await dbContext
+      .update(media)
+      .set({ order: newOrder })
+      .where(eq(media.id, id))
+      .returning();
+    return mediaItem;
+  }
+
+  async reorderMedia(blockId: string, mediaOrderUpdates: { id: string; order: number }[], tx?: any): Promise<Media[]> {
+    if (tx) {
+      // Use provided transaction
+      return await this.reorderMediaInTransaction(tx, blockId, mediaOrderUpdates);
+    } else {
+      // Create own transaction for atomicity
+      return await db.transaction(async (innerTx) => {
+        return await this.reorderMediaInTransaction(innerTx, blockId, mediaOrderUpdates);
+      });
+    }
+  }
+
+  private async reorderMediaInTransaction(tx: any, blockId: string, mediaOrderUpdates: { id: string; order: number }[]): Promise<Media[]> {
+    // Security validation: Verify all media IDs belong to the specified block
+    const mediaIds = mediaOrderUpdates.map(update => update.id);
+    const existingMedia = await tx
+      .select({ id: media.id })
+      .from(media)
+      .where(eq(media.blockId, blockId));
+    
+    const validMediaIds = new Set(existingMedia.map(m => m.id));
+    const invalidIds = mediaIds.filter(id => !validMediaIds.has(id));
+    
+    if (invalidIds.length > 0) {
+      throw new Error(`Media IDs do not belong to block ${blockId}: ${invalidIds.join(', ')}`);
+    }
+    
+    // Update each media item's order atomically
+    for (const update of mediaOrderUpdates) {
+      await tx
+        .update(media)
+        .set({ order: update.order })
+        .where(eq(media.id, update.id));
+    }
+    
+    // Return the updated media list using the same transaction
+    return await tx
+      .select()
+      .from(media)
+      .where(eq(media.blockId, blockId))
+      .orderBy(asc(media.order), asc(media.createdAt));
   }
 }
 

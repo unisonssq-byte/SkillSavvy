@@ -130,6 +130,16 @@ export function useWebSocket() {
           });
         }
         break;
+      
+      case "MEDIA_REORDERED":
+        // Update media cache with new order
+        if (data.payload.blockId) {
+          queryClient.setQueryData(
+            ["/api/blocks", data.payload.blockId, "media"],
+            data.payload.media
+          );
+        }
+        break;
 
       case "BATCH_OPERATION":
         // Handle batch operations by invalidating all affected queries

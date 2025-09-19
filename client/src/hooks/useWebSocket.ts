@@ -8,6 +8,7 @@ export function useWebSocket() {
   const { toast } = useToast();
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
   const reconnectCount = useRef(0);
+  const maxReconnectAttempts = 5;
 
   const connect = () => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -33,12 +34,20 @@ export function useWebSocket() {
       wsRef.current.onclose = () => {
         console.log("WebSocket disconnected");
         // Attempt to reconnect with exponential backoff
-        if (reconnectCount.current < 5) {
+        if (reconnectCount.current < maxReconnectAttempts) {
           const delay = Math.pow(2, reconnectCount.current) * 1000;
           reconnectTimeoutRef.current = setTimeout(() => {
             reconnectCount.current += 1;
+            console.log(`Attempting to reconnect... (${reconnectCount.current}/${maxReconnectAttempts})`);
             connect();
           }, delay);
+        } else {
+          console.error('Max reconnection attempts reached');
+          toast({
+            title: "Connection lost",
+            description: "Unable to reconnect to the server. Please refresh the page.",
+            variant: "destructive",
+          });
         }
       };
 
@@ -51,6 +60,8 @@ export function useWebSocket() {
   };
 
   const handleWebSocketMessage = (data: any) => {
+    console.log('WebSocket message received:', data.type, data.payload);
+    
     switch (data.type) {
       case "PAGE_CREATED":
         queryClient.invalidateQueries({ queryKey: ["/api/pages"] });
@@ -77,25 +88,59 @@ export function useWebSocket() {
         break;
 
       case "BLOCK_CREATED":
+        // Invalidate both the specific page blocks and general pages query
         queryClient.invalidateQueries({ 
           queryKey: ["/api/pages", data.payload.pageId, "blocks"] 
         });
-        break;
-
-      case "BLOCK_UPDATED":
-        queryClient.invalidateQueries({ 
-          queryKey: ["/api/pages", data.payload.pageId, "blocks"] 
-        });
-        break;
-
-      case "BLOCK_DELETED":
         queryClient.invalidateQueries({ queryKey: ["/api/pages"] });
         break;
 
+      case "BLOCK_UPDATED":
+        // Invalidate both the specific page blocks and general pages query
+        queryClient.invalidateQueries({ 
+          queryKey: ["/api/pages", data.payload.pageId, "blocks"] 
+        });
+        queryClient.invalidateQueries({ queryKey: ["/api/pages"] });
+        break;
+
+      case "BLOCK_DELETED":
+        // Invalidate all relevant queries when block is deleted
+        queryClient.invalidateQueries({ queryKey: ["/api/pages"] });
+        if (data.payload.pageId) {
+          queryClient.invalidateQueries({ 
+            queryKey: ["/api/pages", data.payload.pageId, "blocks"] 
+          });
+        }
+        break;
+
       case "MEDIA_UPLOADED":
+      case "MEDIA_CREATED":
+        // Handle both event types for consistency
         if (data.payload.blockId) {
           queryClient.invalidateQueries({ 
             queryKey: ["/api/blocks", data.payload.blockId, "media"] 
+          });
+        }
+        break;
+
+      case "MEDIA_DELETED":
+        if (data.payload.blockId) {
+          queryClient.invalidateQueries({ 
+            queryKey: ["/api/blocks", data.payload.blockId, "media"] 
+          });
+        }
+        break;
+
+      case "BATCH_OPERATION":
+        // Handle batch operations by invalidating all affected queries
+        console.log('Batch operation completed, refreshing all data');
+        queryClient.invalidateQueries({ queryKey: ["/api/pages"] });
+        // Invalidate all block queries for affected pages
+        if (data.payload.affectedPages) {
+          data.payload.affectedPages.forEach((pageId: string) => {
+            queryClient.invalidateQueries({ 
+              queryKey: ["/api/pages", pageId, "blocks"] 
+            });
           });
         }
         break;

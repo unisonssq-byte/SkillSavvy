@@ -182,6 +182,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const results: any[] = [];
       const broadcastEvents: any[] = [];
+      const affectedPages = new Set<string>();
 
       // Process all operations in a single transaction
       await db.transaction(async (tx) => {
@@ -192,6 +193,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             switch (operation.type) {
               case 'page_create':
                 result = await storage.createPage(operation.data, tx);
+                affectedPages.add(result.id);
                 broadcastEvents.push({
                   type: 'PAGE_CREATED',
                   payload: result,
@@ -202,6 +204,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 if (!result) {
                   throw new Error(`Page ${operation.id} not found`);
                 }
+                affectedPages.add(result.id);
                 broadcastEvents.push({
                   type: 'PAGE_UPDATED',
                   payload: result,
@@ -212,6 +215,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 if (!pageDeleted) {
                   throw new Error(`Page ${operation.id} not found`);
                 }
+                affectedPages.add(operation.id);
                 result = { success: true };
                 broadcastEvents.push({
                   type: 'PAGE_DELETED',
@@ -220,6 +224,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 break;
               case 'block_create':
                 result = await storage.createBlock(operation.data, tx);
+                affectedPages.add(result.pageId);
                 broadcastEvents.push({
                   type: 'BLOCK_CREATED',
                   payload: result,
@@ -230,12 +235,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 if (!result) {
                   throw new Error(`Block ${operation.id} not found`);
                 }
+                affectedPages.add(result.pageId);
                 broadcastEvents.push({
                   type: 'BLOCK_UPDATED',
                   payload: result,
                 });
                 break;
               case 'block_delete':
+                // Get the block info before deletion to track pageId
+                const blockToDelete = await storage.getBlock(operation.id, tx);
+                if (!blockToDelete) {
+                  throw new Error(`Block ${operation.id} not found`);
+                }
+                affectedPages.add(blockToDelete.pageId);
                 const blockDeleted = await storage.deleteBlock(operation.id, tx);
                 if (!blockDeleted) {
                   throw new Error(`Block ${operation.id} not found`);
@@ -243,7 +255,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 result = { success: true };
                 broadcastEvents.push({
                   type: 'BLOCK_DELETED',
-                  payload: { id: operation.id },
+                  payload: { id: operation.id, pageId: blockToDelete.pageId },
                 });
                 break;
               case 'media_create':
@@ -282,6 +294,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       broadcastEvents.forEach(event => {
         broadcastToAll(event);
       });
+
+      // Broadcast comprehensive batch operation event for better real-time synchronization
+      if (operations.length > 1) {
+        broadcastToAll({
+          type: 'BATCH_OPERATION',
+          payload: {
+            operationCount: operations.length,
+            affectedPages: Array.from(affectedPages),
+            timestamp: new Date().toISOString(),
+          },
+        });
+      }
 
       res.json({
         success: true,
@@ -435,16 +459,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete('/api/blocks/:id', verifyAdmin, async (req, res) => {
     try {
       const { id } = req.params;
+      
+      // Get block info before deletion to track pageId for real-time sync
+      const blockToDelete = await storage.getBlock(id);
+      if (!blockToDelete) {
+        return res.status(404).json({ message: 'Block not found' });
+      }
+      
       const success = await storage.deleteBlock(id);
       
       if (!success) {
         return res.status(404).json({ message: 'Block not found' });
       }
       
-      // Broadcast block deletion
+      // Broadcast block deletion with pageId for proper client-side cache invalidation
       broadcastToAll({
         type: 'BLOCK_DELETED',
-        payload: { id },
+        payload: { id, pageId: blockToDelete.pageId },
       });
       
       res.json({ success: true });

@@ -5,15 +5,23 @@ import { WebSocketServer, WebSocket } from "ws";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import { exec } from "child_process";
+import { promisify } from "util";
 import bcrypt from "bcrypt";
 import { storage } from "./storage";
 import { insertPageSchema, insertBlockSchema } from "@shared/schema";
 import { z } from "zod";
 
+const execAsync = promisify(exec);
+
 // Ensure uploads directory exists
 const uploadsDir = path.join(process.cwd(), "uploads");
+const thumbnailsDir = path.join(uploadsDir, "thumbnails");
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
+}
+if (!fs.existsSync(thumbnailsDir)) {
+  fs.mkdirSync(thumbnailsDir, { recursive: true });
 }
 
 // Multer configuration for file uploads
@@ -35,7 +43,7 @@ const upload = multer({
 });
 
 // Password validation (simulating password.py)
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "unicode2024!";
 
 // WebSocket connections storage
 const wsConnections = new Set<WebSocket>();
@@ -47,6 +55,16 @@ function broadcastToAll(data: any) {
       ws.send(message);
     }
   });
+}
+
+// Generate video thumbnail
+async function generateVideoThumbnail(videoPath: string, thumbnailPath: string): Promise<void> {
+  try {
+    await execAsync(`ffmpeg -i "${videoPath}" -ss 00:00:01.000 -vframes 1 -q:v 2 "${thumbnailPath}"`);
+  } catch (error) {
+    console.error('Failed to generate thumbnail:', error);
+    throw error;
+  }
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -274,6 +292,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Move file to final location
       fs.renameSync(file.path, filepath);
       
+      let thumbnailUrl = null;
+      
+      // Generate thumbnail for videos
+      if (file.mimetype.startsWith('video/')) {
+        try {
+          const thumbnailFilename = `thumb_${Date.now()}.jpg`;
+          const thumbnailPath = path.join(thumbnailsDir, thumbnailFilename);
+          await generateVideoThumbnail(filepath, thumbnailPath);
+          thumbnailUrl = `/uploads/thumbnails/${thumbnailFilename}`;
+        } catch (error) {
+          console.error('Failed to generate video thumbnail:', error);
+        }
+      }
+      
       const media = await storage.createMedia({
         blockId: blockId || null,
         filename,
@@ -281,6 +313,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         mimetype: file.mimetype,
         size: file.size,
         url: `/uploads/${filename}`,
+        thumbnailUrl,
       });
       
       // Broadcast media upload

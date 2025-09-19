@@ -1,5 +1,24 @@
 <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="32" height="32" rx="8" fill="#8B5CF6"/>
-  <path d="M8 12H9.5V20H8V12Z" fill="white"/>
-  <path d="M11.5 12H13V15H15V12H24V13.5H16.5V15.5H14V18.5H17.5V20H11.5V12Z" fill="white"/>
+  <!-- Background with gradient -->
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#8B5CF6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#6366F1;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Rounded background -->
+  <rect width="32" height="32" rx="8" fill="url(#bg)"/>
+  
+  <!-- Unicode symbol (stylized U with code brackets) -->
+  <path d="M8 8h2v8c0 2 1.5 3.5 3.5 3.5s3.5-1.5 3.5-3.5V8h2v8c0 3-2.5 5.5-5.5 5.5S8 19 8 16V8z" fill="white" opacity="0.95"/>
+  
+  <!-- Code brackets -->
+  <path d="M20 10l2 2-2 2v2l4-4-4-4v2z" fill="white" opacity="0.8"/>
+  <path d="M6 12l-2-2 2-2V6l-4 4 4 4v-2z" fill="white" opacity="0.8"/>
+  
+  <!-- Binary dots representing code -->
+  <circle cx="24" cy="24" r="1" fill="white" opacity="0.6"/>
+  <circle cx="26" cy="26" r="1" fill="white" opacity="0.6"/>
+  <circle cx="22" cy="26" r="1" fill="white" opacity="0.6"/>
 </svg>

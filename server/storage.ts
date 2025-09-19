@@ -25,22 +25,22 @@ export interface IStorage {
   getPages(): Promise<Page[]>;
   getPage(id: string): Promise<Page | undefined>;
   getPageBySlug(slug: string): Promise<Page | undefined>;
-  createPage(page: InsertPage): Promise<Page>;
-  updatePage(id: string, updates: Partial<InsertPage>): Promise<Page | undefined>;
-  deletePage(id: string): Promise<boolean>;
+  createPage(page: InsertPage, tx?: any): Promise<Page>;
+  updatePage(id: string, updates: Partial<InsertPage>, tx?: any): Promise<Page | undefined>;
+  deletePage(id: string, tx?: any): Promise<boolean>;
   
   // Block operations
   getBlocksByPageId(pageId: string): Promise<Block[]>;
   getChildBlocks(parentId: string): Promise<Block[]>;
   getBlock(id: string): Promise<Block | undefined>;
-  createBlock(block: InsertBlock): Promise<Block>;
-  updateBlock(id: string, updates: Partial<InsertBlock>): Promise<Block | undefined>;
-  deleteBlock(id: string): Promise<boolean>;
+  createBlock(block: InsertBlock, tx?: any): Promise<Block>;
+  updateBlock(id: string, updates: Partial<InsertBlock>, tx?: any): Promise<Block | undefined>;
+  deleteBlock(id: string, tx?: any): Promise<boolean>;
   
   // Media operations
   getMediaByBlockId(blockId: string): Promise<Media[]>;
-  createMedia(media: InsertMedia): Promise<Media>;
-  deleteMedia(id: string): Promise<boolean>;
+  createMedia(media: InsertMedia, tx?: any): Promise<Media>;
+  deleteMedia(id: string, tx?: any): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -75,16 +75,18 @@ export class DatabaseStorage implements IStorage {
     return page || undefined;
   }
 
-  async createPage(insertPage: InsertPage): Promise<Page> {
-    const [page] = await db.insert(pages).values({
+  async createPage(insertPage: InsertPage, tx?: any): Promise<Page> {
+    const dbContext = tx || db;
+    const [page] = await dbContext.insert(pages).values({
       ...insertPage,
       updatedAt: new Date(),
     }).returning();
     return page;
   }
 
-  async updatePage(id: string, updates: Partial<InsertPage>): Promise<Page | undefined> {
-    const [page] = await db
+  async updatePage(id: string, updates: Partial<InsertPage>, tx?: any): Promise<Page | undefined> {
+    const dbContext = tx || db;
+    const [page] = await dbContext
       .update(pages)
       .set({ ...updates, updatedAt: new Date() })
       .where(eq(pages.id, id))
@@ -92,8 +94,9 @@ export class DatabaseStorage implements IStorage {
     return page || undefined;
   }
 
-  async deletePage(id: string): Promise<boolean> {
-    const result = await db.delete(pages).where(eq(pages.id, id));
+  async deletePage(id: string, tx?: any): Promise<boolean> {
+    const dbContext = tx || db;
+    const result = await dbContext.delete(pages).where(eq(pages.id, id));
     return (result.rowCount ?? 0) > 0;
   }
 
@@ -104,21 +107,23 @@ export class DatabaseStorage implements IStorage {
       .orderBy(asc(blocks.order));
   }
 
-  async getChildBlocks(parentId: string): Promise<Block[]> {
-    return await db.select().from(blocks)
+  async getChildBlocks(parentId: string, tx?: any): Promise<Block[]> {
+    const dbContext = tx || db;
+    return await dbContext.select().from(blocks)
       .where(eq(blocks.parentId, parentId))
       .orderBy(asc(blocks.order));
   }
 
-  async getBlock(id: string): Promise<Block | undefined> {
-    const [block] = await db.select().from(blocks).where(eq(blocks.id, id));
+  async getBlock(id: string, tx?: any): Promise<Block | undefined> {
+    const dbContext = tx || db;
+    const [block] = await dbContext.select().from(blocks).where(eq(blocks.id, id));
     return block || undefined;
   }
 
-  async createBlock(insertBlock: InsertBlock): Promise<Block> {
+  async createBlock(insertBlock: InsertBlock, tx?: any): Promise<Block> {
     // Validate parent-child relationship
     if (insertBlock.parentId) {
-      const parent = await this.getBlock(insertBlock.parentId);
+      const parent = await this.getBlock(insertBlock.parentId, tx);
       if (!parent) {
         throw new Error("Parent block not found");
       }
@@ -127,15 +132,16 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
-    const [block] = await db.insert(blocks).values({
+    const dbContext = tx || db;
+    const [block] = await dbContext.insert(blocks).values({
       ...insertBlock,
       updatedAt: new Date(),
     }).returning();
     return block;
   }
 
-  async updateBlock(id: string, updates: Partial<InsertBlock>): Promise<Block | undefined> {
-    const currentBlock = await this.getBlock(id);
+  async updateBlock(id: string, updates: Partial<InsertBlock>, tx?: any): Promise<Block | undefined> {
+    const currentBlock = await this.getBlock(id, tx);
     if (!currentBlock) {
       throw new Error("Block not found");
     }
@@ -144,14 +150,14 @@ export class DatabaseStorage implements IStorage {
     if (updates.pageId !== undefined && updates.pageId !== currentBlock.pageId) {
       // If block has a parent, ensure parent is on the same target page
       if (currentBlock.parentId) {
-        const parent = await this.getBlock(currentBlock.parentId);
+        const parent = await this.getBlock(currentBlock.parentId, tx);
         if (parent && parent.pageId !== updates.pageId) {
           throw new Error("Cannot move block to different page than its parent");
         }
       }
       
       // If block has children, reject the operation as it would break subtree consistency
-      const children = await this.getChildBlocks(id);
+      const children = await this.getChildBlocks(id, tx);
       if (children.length > 0) {
         throw new Error("Cannot move a block with children to a different page. Move the entire subtree instead.");
       }
@@ -166,7 +172,7 @@ export class DatabaseStorage implements IStorage {
       
       // Validate parent exists and belongs to same page
       if (updates.parentId) {
-        const parent = await this.getBlock(updates.parentId);
+        const parent = await this.getBlock(updates.parentId, tx);
         if (!parent) {
           throw new Error("Parent block not found");
         }
@@ -178,13 +184,14 @@ export class DatabaseStorage implements IStorage {
         }
         
         // Prevent cycles by checking if proposed parent is a descendant of current block
-        if (await this.isDescendant(id, updates.parentId)) {
+        if (await this.isDescendant(id, updates.parentId, tx)) {
           throw new Error("Cannot create circular parent-child relationship");
         }
       }
     }
 
-    const [block] = await db
+    const dbContext = tx || db;
+    const [block] = await dbContext
       .update(blocks)
       .set({ ...updates, updatedAt: new Date() })
       .where(eq(blocks.id, id))
@@ -193,35 +200,44 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Helper method to check if a block is a descendant of another
-  private async isDescendant(ancestorId: string, blockId: string): Promise<boolean> {
-    const children = await this.getChildBlocks(ancestorId);
+  private async isDescendant(ancestorId: string, blockId: string, tx?: any): Promise<boolean> {
+    const children = await this.getChildBlocks(ancestorId, tx);
     for (const child of children) {
       if (child.id === blockId) {
         return true;
       }
-      if (await this.isDescendant(child.id, blockId)) {
+      if (await this.isDescendant(child.id, blockId, tx)) {
         return true;
       }
     }
     return false;
   }
 
-  async deleteBlock(id: string): Promise<boolean> {
+  async deleteBlock(id: string, tx?: any): Promise<boolean> {
     try {
-      // Use a transaction to ensure atomic deletion of entire subtree
-      const result = await db.transaction(async (tx) => {
-        // Recursively delete children first
+      if (tx) {
+        // Use provided transaction
         const children = await tx.select().from(blocks).where(eq(blocks.parentId, id));
         for (const child of children) {
           await this.deleteBlockInTransaction(tx, child.id);
         }
         
-        // Then delete the block itself
         const deleteResult = await tx.delete(blocks).where(eq(blocks.id, id));
-        return deleteResult.rowCount ?? 0;
-      });
-      
-      return result > 0;
+        return (deleteResult.rowCount ?? 0) > 0;
+      } else {
+        // Create own transaction
+        const result = await db.transaction(async (innerTx) => {
+          const children = await innerTx.select().from(blocks).where(eq(blocks.parentId, id));
+          for (const child of children) {
+            await this.deleteBlockInTransaction(innerTx, child.id);
+          }
+          
+          const deleteResult = await innerTx.delete(blocks).where(eq(blocks.id, id));
+          return deleteResult.rowCount ?? 0;
+        });
+        
+        return result > 0;
+      }
     } catch (error) {
       console.error('Failed to delete block:', error);
       return false;
@@ -245,13 +261,15 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(media).where(eq(media.blockId, blockId));
   }
 
-  async createMedia(insertMedia: InsertMedia): Promise<Media> {
-    const [mediaItem] = await db.insert(media).values(insertMedia).returning();
+  async createMedia(insertMedia: InsertMedia, tx?: any): Promise<Media> {
+    const dbContext = tx || db;
+    const [mediaItem] = await dbContext.insert(media).values(insertMedia).returning();
     return mediaItem;
   }
 
-  async deleteMedia(id: string): Promise<boolean> {
-    const result = await db.delete(media).where(eq(media.id, id));
+  async deleteMedia(id: string, tx?: any): Promise<boolean> {
+    const dbContext = tx || db;
+    const result = await dbContext.delete(media).where(eq(media.id, id));
     return (result.rowCount ?? 0) > 0;
   }
 }

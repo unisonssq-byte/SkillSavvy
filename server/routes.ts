@@ -9,8 +9,51 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import bcrypt from "bcrypt";
 import { storage } from "./storage";
-import { insertPageSchema, insertBlockSchema } from "@shared/schema";
+import { db } from "./db";
+import { insertPageSchema, insertBlockSchema, insertMediaSchema } from "@shared/schema";
 import { z } from "zod";
+
+// Batch operation schemas
+const batchOperationSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("page_create"),
+    data: insertPageSchema,
+  }),
+  z.object({
+    type: z.literal("page_update"),
+    id: z.string(),
+    data: insertPageSchema.partial(),
+  }),
+  z.object({
+    type: z.literal("page_delete"),
+    id: z.string(),
+  }),
+  z.object({
+    type: z.literal("block_create"),
+    data: insertBlockSchema,
+  }),
+  z.object({
+    type: z.literal("block_update"),
+    id: z.string(),
+    data: insertBlockSchema.partial(),
+  }),
+  z.object({
+    type: z.literal("block_delete"),
+    id: z.string(),
+  }),
+  z.object({
+    type: z.literal("media_create"),
+    data: insertMediaSchema,
+  }),
+  z.object({
+    type: z.literal("media_delete"),
+    id: z.string(),
+  }),
+]);
+
+const batchRequestSchema = z.object({
+  operations: z.array(batchOperationSchema),
+});
 
 const execAsync = promisify(exec);
 
@@ -127,6 +170,139 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(401).json({ message: 'Invalid token' });
     }
   };
+
+  // Batch operations endpoint
+  app.post('/api/batch', verifyAdmin, async (req, res) => {
+    try {
+      const { operations } = batchRequestSchema.parse(req.body);
+      
+      if (operations.length === 0) {
+        return res.status(400).json({ message: 'No operations provided' });
+      }
+
+      const results: any[] = [];
+      const broadcastEvents: any[] = [];
+
+      // Process all operations in a single transaction
+      await db.transaction(async (tx) => {
+        for (const operation of operations) {
+          try {
+            let result: any;
+
+            switch (operation.type) {
+              case 'page_create':
+                result = await storage.createPage(operation.data, tx);
+                broadcastEvents.push({
+                  type: 'PAGE_CREATED',
+                  payload: result,
+                });
+                break;
+              case 'page_update':
+                result = await storage.updatePage(operation.id, operation.data, tx);
+                if (!result) {
+                  throw new Error(`Page ${operation.id} not found`);
+                }
+                broadcastEvents.push({
+                  type: 'PAGE_UPDATED',
+                  payload: result,
+                });
+                break;
+              case 'page_delete':
+                const pageDeleted = await storage.deletePage(operation.id, tx);
+                if (!pageDeleted) {
+                  throw new Error(`Page ${operation.id} not found`);
+                }
+                result = { success: true };
+                broadcastEvents.push({
+                  type: 'PAGE_DELETED',
+                  payload: { id: operation.id },
+                });
+                break;
+              case 'block_create':
+                result = await storage.createBlock(operation.data, tx);
+                broadcastEvents.push({
+                  type: 'BLOCK_CREATED',
+                  payload: result,
+                });
+                break;
+              case 'block_update':
+                result = await storage.updateBlock(operation.id, operation.data, tx);
+                if (!result) {
+                  throw new Error(`Block ${operation.id} not found`);
+                }
+                broadcastEvents.push({
+                  type: 'BLOCK_UPDATED',
+                  payload: result,
+                });
+                break;
+              case 'block_delete':
+                const blockDeleted = await storage.deleteBlock(operation.id, tx);
+                if (!blockDeleted) {
+                  throw new Error(`Block ${operation.id} not found`);
+                }
+                result = { success: true };
+                broadcastEvents.push({
+                  type: 'BLOCK_DELETED',
+                  payload: { id: operation.id },
+                });
+                break;
+              case 'media_create':
+                result = await storage.createMedia(operation.data, tx);
+                broadcastEvents.push({
+                  type: 'MEDIA_CREATED',
+                  payload: result,
+                });
+                break;
+              case 'media_delete':
+                const mediaDeleted = await storage.deleteMedia(operation.id, tx);
+                if (!mediaDeleted) {
+                  throw new Error(`Media ${operation.id} not found`);
+                }
+                result = { success: true };
+                broadcastEvents.push({
+                  type: 'MEDIA_DELETED',
+                  payload: { id: operation.id },
+                });
+                break;
+            }
+
+            results.push({
+              operation,
+              result,
+              success: true,
+            });
+          } catch (error) {
+            // If any operation fails, the entire transaction will be rolled back
+            throw new Error(`Operation failed: ${(error as Error).message}`);
+          }
+        }
+      });
+
+      // If we reach here, all operations succeeded. Now broadcast all events.
+      broadcastEvents.forEach(event => {
+        broadcastToAll(event);
+      });
+
+      res.json({
+        success: true,
+        results,
+        message: `Successfully processed ${operations.length} operations`,
+      });
+
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ 
+          message: 'Invalid batch request', 
+          errors: error.errors 
+        });
+      } else {
+        res.status(500).json({ 
+          message: 'Batch operation failed', 
+          error: (error as Error).message 
+        });
+      }
+    }
+  });
 
   // Page routes
   app.get('/api/pages', async (req, res) => {

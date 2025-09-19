@@ -1,5 +1,5 @@
 import { useParams } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
 import Header from "@/components/Header";
 import ContentBlock from "@/components/ContentBlock";
@@ -9,17 +9,52 @@ import AdminPanel from "@/components/AdminPanel";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useAdmin } from "@/hooks/useAdmin";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Plus } from "lucide-react";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import type { Page, Block } from "@shared/schema";
 
 export default function Portfolio() {
   const { pageSlug } = useParams();
   const { isAdmin } = useAdmin();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [currentPageId, setCurrentPageId] = useState<string>("");
   const [showAddBlock, setShowAddBlock] = useState(false);
+  const [newBlockType, setNewBlockType] = useState<string>("text");
+  const [newBlockContent, setNewBlockContent] = useState<string>("");
 
   // Initialize WebSocket connection
   useWebSocket();
+
+  // Mutation for creating new block
+  const createBlockMutation = useMutation({
+    mutationFn: async (blockData: { pageId: string; type: string; content: any }) => {
+      const response = await apiRequest("POST", "/api/blocks", blockData);
+      return response.json();
+    },
+    onSuccess: (newBlock) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/pages", currentPageId, "blocks"] });
+      setShowAddBlock(false);
+      setNewBlockType("text");
+      setNewBlockContent("");
+      toast({
+        title: "Block created",
+        description: "New content block has been added successfully.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: "Failed to create block. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
 
   // Fetch pages
   const { data: pages = [], isLoading: pagesLoading } = useQuery<Page[]>({
@@ -48,6 +83,20 @@ export default function Portfolio() {
   }, [pages, pageSlug]);
 
   const currentPage = pages.find(p => p.id === currentPageId);
+
+  const handleCreateBlock = () => {
+    if (!newBlockContent.trim() || !currentPageId) return;
+    
+    const content = newBlockType === "text" 
+      ? { text: newBlockContent.trim() }
+      : { text: newBlockContent.trim() };
+
+    createBlockMutation.mutate({
+      pageId: currentPageId,
+      type: newBlockType,
+      content,
+    });
+  };
 
   if (pagesLoading || blocksLoading) {
     return (
@@ -120,6 +169,58 @@ export default function Portfolio() {
       <AdminAuthModal />
       <MediaUploadModal isOpen={false} onClose={() => {}} />
       {isAdmin && <AdminPanel />}
+
+      {/* Add Block Modal */}
+      <Dialog open={showAddBlock} onOpenChange={setShowAddBlock}>
+        <DialogContent className="slide-in" data-testid="modal-add-block">
+          <DialogHeader>
+            <DialogTitle>Add New Content Block</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium mb-2 block">Block Type</label>
+              <Select value={newBlockType} onValueChange={setNewBlockType} data-testid="select-block-type">
+                <SelectTrigger>
+                  <SelectValue placeholder="Select block type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="text">Text Block</SelectItem>
+                  <SelectItem value="media">Media Block</SelectItem>
+                  <SelectItem value="text_media">Text + Media Block</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block">Content</label>
+              <Textarea
+                value={newBlockContent}
+                onChange={(e) => setNewBlockContent(e.target.value)}
+                placeholder="Enter your content here..."
+                className="min-h-[100px]"
+                data-testid="textarea-block-content"
+              />
+            </div>
+            <div className="flex space-x-3">
+              <Button
+                onClick={handleCreateBlock}
+                disabled={!newBlockContent.trim() || createBlockMutation.isPending}
+                className="flex-1"
+                data-testid="button-create-block"
+              >
+                {createBlockMutation.isPending ? "Creating..." : "Create Block"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setShowAddBlock(false)}
+                className="flex-1"
+                data-testid="button-cancel-block"
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

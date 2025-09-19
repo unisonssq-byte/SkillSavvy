@@ -2,7 +2,8 @@ import { useParams } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
 import Header from "@/components/Header";
-import ContentBlock from "@/components/ContentBlock";
+import TextBlock from "@/components/TextBlock";
+import RightMediaSubstrate from "@/components/RightMediaSubstrate";
 import AdminAuthModal from "@/components/AdminAuthModal";
 import MediaUploadModal from "@/components/MediaUploadModal";
 import AdminPanel from "@/components/AdminPanel";
@@ -27,6 +28,7 @@ export default function Portfolio() {
   const [showAddBlock, setShowAddBlock] = useState(false);
   const [newBlockType, setNewBlockType] = useState<string>("text");
   const [newBlockContent, setNewBlockContent] = useState<string>("");
+  const [activeMediaBlockId, setActiveMediaBlockId] = useState<string | null>(null);
 
   // Initialize WebSocket connection
   useWebSocket();
@@ -82,6 +84,24 @@ export default function Portfolio() {
     }
   }, [pages, pageSlug]);
 
+  // Manage active media block state
+  useEffect(() => {
+    const mediaBlocks = blocks.filter(block => block.type === 'media' || block.type === 'text_media');
+    
+    if (mediaBlocks.length === 0) {
+      // No media blocks, clear active state
+      setActiveMediaBlockId(null);
+    } else if (!activeMediaBlockId || !mediaBlocks.find(block => block.id === activeMediaBlockId)) {
+      // No active block or current active block is stale, set to first available
+      setActiveMediaBlockId(mediaBlocks[0].id);
+    }
+  }, [blocks, activeMediaBlockId]);
+
+  // Reset active media block when page changes
+  useEffect(() => {
+    setActiveMediaBlockId(null);
+  }, [currentPageId]);
+
   const currentPage = pages.find(p => p.id === currentPageId);
 
   const handleCreateBlock = () => {
@@ -120,14 +140,17 @@ export default function Portfolio() {
       <main className="pt-24 pb-12">
         <div className="max-w-5xl mx-auto px-6">
           <div className="space-y-8 fade-in">
-            {blocks.map((block, index) => (
-              <ContentBlock
-                key={block.id}
-                block={block}
-                index={index}
-                isAdmin={isAdmin}
-              />
-            ))}
+            {blocks
+              .filter(block => block.type === 'text' || block.type === 'text_media')
+              .map((block, index) => (
+                <TextBlock
+                  key={block.id}
+                  block={block}
+                  index={index}
+                  isAdmin={isAdmin}
+                />
+              ))
+            }
 
             {/* Add New Block Button */}
             {isAdmin && (
@@ -164,6 +187,22 @@ export default function Portfolio() {
           </div>
         </div>
       </main>
+
+      {/* Single Right Media Substrate - shows media for active block */}
+      {activeMediaBlockId && (() => {
+        const mediaBlocks = blocks.filter(block => block.type === 'media' || block.type === 'text_media');
+        const activeBlock = blocks.find(block => block.id === activeMediaBlockId);
+        return activeBlock ? (
+          <RightMediaSubstrate
+            key={`media-${activeBlock.id}`}
+            block={activeBlock}
+            index={blocks.indexOf(activeBlock)}
+            isAdmin={isAdmin}
+            allMediaBlocks={mediaBlocks}
+            onBlockChange={setActiveMediaBlockId}
+          />
+        ) : null;
+      })()}
 
       {/* Admin Components */}
       <AdminAuthModal />

@@ -13,7 +13,7 @@ import {
   type InsertMedia,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, asc, desc } from "drizzle-orm";
+import { eq, asc, desc, isNull, and } from "drizzle-orm";
 
 export interface IStorage {
   // User operations
@@ -31,6 +31,7 @@ export interface IStorage {
   
   // Block operations
   getBlocksByPageId(pageId: string): Promise<Block[]>;
+  getChildBlocks(parentId: string): Promise<Block[]>;
   getBlock(id: string): Promise<Block | undefined>;
   createBlock(block: InsertBlock): Promise<Block>;
   updateBlock(id: string, updates: Partial<InsertBlock>): Promise<Block | undefined>;
@@ -98,7 +99,15 @@ export class DatabaseStorage implements IStorage {
 
   // Block operations
   async getBlocksByPageId(pageId: string): Promise<Block[]> {
-    return await db.select().from(blocks).where(eq(blocks.pageId, pageId)).orderBy(asc(blocks.order));
+    return await db.select().from(blocks)
+      .where(and(eq(blocks.pageId, pageId), isNull(blocks.parentId)))
+      .orderBy(asc(blocks.order));
+  }
+
+  async getChildBlocks(parentId: string): Promise<Block[]> {
+    return await db.select().from(blocks)
+      .where(eq(blocks.parentId, parentId))
+      .orderBy(asc(blocks.order));
   }
 
   async getBlock(id: string): Promise<Block | undefined> {
@@ -107,6 +116,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createBlock(insertBlock: InsertBlock): Promise<Block> {
+    // Validate parent-child relationship
+    if (insertBlock.parentId) {
+      const parent = await this.getBlock(insertBlock.parentId);
+      if (!parent) {
+        throw new Error("Parent block not found");
+      }
+      if (parent.pageId !== insertBlock.pageId) {
+        throw new Error("Parent and child blocks must belong to the same page");
+      }
+    }
+
     const [block] = await db.insert(blocks).values({
       ...insertBlock,
       updatedAt: new Date(),
@@ -115,6 +135,55 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateBlock(id: string, updates: Partial<InsertBlock>): Promise<Block | undefined> {
+    const currentBlock = await this.getBlock(id);
+    if (!currentBlock) {
+      throw new Error("Block not found");
+    }
+
+    // Validate pageId changes
+    if (updates.pageId !== undefined && updates.pageId !== currentBlock.pageId) {
+      // If block has a parent, ensure parent is on the same target page
+      if (currentBlock.parentId) {
+        const parent = await this.getBlock(currentBlock.parentId);
+        if (parent && parent.pageId !== updates.pageId) {
+          throw new Error("Cannot move block to different page than its parent");
+        }
+      }
+      
+      // If block has children, reject the operation as it would break subtree consistency
+      const children = await this.getChildBlocks(id);
+      if (children.length > 0) {
+        throw new Error("Cannot move a block with children to a different page. Move the entire subtree instead.");
+      }
+    }
+
+    // Validate parent-child relationship if parentId is being updated
+    if (updates.parentId !== undefined) {
+      // Prevent self-reference
+      if (updates.parentId === id) {
+        throw new Error("Block cannot be its own parent");
+      }
+      
+      // Validate parent exists and belongs to same page
+      if (updates.parentId) {
+        const parent = await this.getBlock(updates.parentId);
+        if (!parent) {
+          throw new Error("Parent block not found");
+        }
+        
+        // Check page consistency
+        const targetPageId = updates.pageId ?? currentBlock.pageId;
+        if (parent.pageId !== targetPageId) {
+          throw new Error("Parent and child blocks must belong to the same page");
+        }
+        
+        // Prevent cycles by checking if proposed parent is a descendant of current block
+        if (await this.isDescendant(id, updates.parentId)) {
+          throw new Error("Cannot create circular parent-child relationship");
+        }
+      }
+    }
+
     const [block] = await db
       .update(blocks)
       .set({ ...updates, updatedAt: new Date() })
@@ -123,9 +192,52 @@ export class DatabaseStorage implements IStorage {
     return block || undefined;
   }
 
+  // Helper method to check if a block is a descendant of another
+  private async isDescendant(ancestorId: string, blockId: string): Promise<boolean> {
+    const children = await this.getChildBlocks(ancestorId);
+    for (const child of children) {
+      if (child.id === blockId) {
+        return true;
+      }
+      if (await this.isDescendant(child.id, blockId)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   async deleteBlock(id: string): Promise<boolean> {
-    const result = await db.delete(blocks).where(eq(blocks.id, id));
-    return (result.rowCount ?? 0) > 0;
+    try {
+      // Use a transaction to ensure atomic deletion of entire subtree
+      const result = await db.transaction(async (tx) => {
+        // Recursively delete children first
+        const children = await tx.select().from(blocks).where(eq(blocks.parentId, id));
+        for (const child of children) {
+          await this.deleteBlockInTransaction(tx, child.id);
+        }
+        
+        // Then delete the block itself
+        const deleteResult = await tx.delete(blocks).where(eq(blocks.id, id));
+        return deleteResult.rowCount ?? 0;
+      });
+      
+      return result > 0;
+    } catch (error) {
+      console.error('Failed to delete block:', error);
+      return false;
+    }
+  }
+
+  // Helper method for transactional deletion
+  private async deleteBlockInTransaction(tx: any, id: string): Promise<void> {
+    // Recursively delete children first
+    const children = await tx.select().from(blocks).where(eq(blocks.parentId, id));
+    for (const child of children) {
+      await this.deleteBlockInTransaction(tx, child.id);
+    }
+    
+    // Then delete the block itself
+    await tx.delete(blocks).where(eq(blocks.id, id));
   }
 
   // Media operations

@@ -24,7 +24,9 @@ export const pages = pgTable("pages", {
 export const blocks = pgTable("blocks", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   pageId: varchar("page_id").notNull().references(() => pages.id, { onDelete: "cascade" }),
+  parentId: varchar("parent_id"), // references blocks.id via application logic
   type: text("type").notNull(), // "text", "media", "text_media"
+  side: text("side"), // "left", "right", null for main blocks
   content: jsonb("content").notNull(), // flexible content structure
   order: integer("order").default(0),
   createdAt: timestamp("created_at").defaultNow(),
@@ -58,6 +60,14 @@ export const blocksRelations = relations(blocks, ({ one, many }) => ({
   page: one(pages, {
     fields: [blocks.pageId],
     references: [pages.id],
+  }),
+  parent: one(blocks, {
+    fields: [blocks.parentId],
+    references: [blocks.id],
+    relationName: "parent",
+  }),
+  children: many(blocks, {
+    relationName: "parent",
   }),
   media: many(media),
 }));

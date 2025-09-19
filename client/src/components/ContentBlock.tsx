@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Edit2, Plus, Save, X, Trash2 } from "lucide-react";
+import { Edit2, Plus, Save, X, Trash2, Copy } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import ContextMenu, { useContextMenu } from "@/components/ContextMenu";
 import type { Block, Media } from "@shared/schema";
 
 interface ContentBlockProps {
@@ -23,6 +24,10 @@ export default function ContentBlock({ block, index, isAdmin }: ContentBlockProp
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [editContent, setEditContent] = useState(block.content);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const rightMediaInputRef = useRef<HTMLInputElement>(null);
+  const { contextMenu, showContextMenu, hideContextMenu } = useContextMenu();
+  const [draggedMediaId, setDraggedMediaId] = useState<string | null>(null);
+  const [rightSideMedia, setRightSideMedia] = useState<Media[]>([]);
 
   // Fetch media for this block
   const { data: media = [] } = useQuery<Media[]>({
@@ -129,6 +134,52 @@ export default function ContentBlock({ block, index, isAdmin }: ContentBlockProp
     }
   };
 
+  const handleCopyBlock = async () => {
+    try {
+      const textContent = block.content && typeof block.content === 'object' && 'text' in block.content
+        ? (block.content as any).text 
+        : JSON.stringify(block.content || "");
+      await navigator.clipboard.writeText(textContent);
+      toast({
+        title: "Скопировано",
+        description: "Содержимое блока скопировано в буфер обмена.",
+      });
+    } catch (error) {
+      toast({
+        title: "Ошибка",
+        description: "Не удалось скопировать содержимое.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleBlockContextMenu = (e: React.MouseEvent) => {
+    if (isAdmin) {
+      showContextMenu(e);
+    }
+  };
+
+  const handleRightMediaUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      uploadMediaMutation.mutate(file);
+    }
+  };
+
+  const handleMediaDragStart = (e: React.DragEvent, mediaId: string) => {
+    setDraggedMediaId(mediaId);
+    e.dataTransfer.setData('text/plain', mediaId);
+  };
+
+  const handleMediaDragEnd = () => {
+    setDraggedMediaId(null);
+  };
+
+  const handleMediaDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    // Здесь будет логика для изменения позиции медиа
+  };
+
   const renderContent = () => {
     const content = isEditing ? editContent : block.content;
     
@@ -211,7 +262,11 @@ export default function ContentBlock({ block, index, isAdmin }: ContentBlockProp
   };
 
   return (
-    <div className="relative group block-hover" data-testid={`block-${block.id}`}>
+    <div 
+      className="relative group block-hover" 
+      data-testid={`block-${block.id}`}
+      onContextMenu={handleBlockContextMenu}
+    >
       {/* Edit Handle (Admin Only) */}
       {isAdmin && !isEditing && (
         <Button
@@ -316,6 +371,32 @@ export default function ContentBlock({ block, index, isAdmin }: ContentBlockProp
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Block Context Menu */}
+      <ContextMenu
+        x={contextMenu.x}
+        y={contextMenu.y}
+        isVisible={contextMenu.isVisible}
+        onClose={hideContextMenu}
+        options={[
+          {
+            icon: <Edit2 className="w-4 h-4" />,
+            label: "Редактировать",
+            onClick: () => setIsEditing(true),
+          },
+          {
+            icon: <Copy className="w-4 h-4" />,
+            label: "Копировать текст",
+            onClick: handleCopyBlock,
+          },
+          {
+            icon: <Trash2 className="w-4 h-4" />,
+            label: "Удалить блок",
+            variant: "destructive",
+            onClick: () => setShowDeleteDialog(true),
+          },
+        ]}
+      />
     </div>
   );
 }

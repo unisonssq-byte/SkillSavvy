@@ -9,6 +9,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import ContextMenu, { useContextMenu } from "@/components/ContextMenu";
+import AdminSaveButton from "@/components/AdminSaveButton";
 import type { Page } from "@shared/schema";
 
 interface HeaderProps {
@@ -210,19 +211,25 @@ export default function Header({ pages, currentPageId }: HeaderProps) {
               </div>
             </nav>
             
-            {/* Admin Button */}
-            <Button
-              size="sm"
-              variant="secondary"
-              className="w-10 h-10 rounded-lg"
-              onClick={() => {
-                console.log('Admin button clicked!');
-                openAdminModal();
-              }}
-              data-testid="button-admin"
-            >
-              {isAdmin ? <Settings className="w-4 h-4" /> : <User className="w-4 h-4" />}
-            </Button>
+            {/* Admin Controls */}
+            <div className="flex items-center gap-2">
+              {/* Admin Save Button - only shows when admin and has pending changes */}
+              {isAdmin && <AdminSaveButton />}
+              
+              {/* Admin Button */}
+              <Button
+                size="sm"
+                variant="secondary"
+                className="w-10 h-10 rounded-lg"
+                onClick={() => {
+                  console.log('Admin button clicked!');
+                  openAdminModal();
+                }}
+                data-testid="button-admin"
+              >
+                {isAdmin ? <Settings className="w-4 h-4" /> : <User className="w-4 h-4" />}
+              </Button>
+            </div>
           </div>
         </div>
       </div>

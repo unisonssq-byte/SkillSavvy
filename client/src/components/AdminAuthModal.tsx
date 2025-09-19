@@ -67,9 +67,8 @@ export default function AdminAuthModal() {
 
   console.log('About to render Dialog with open =', isAdminModalOpen);
   
-  // Temporary fix: force the dialog to always be open for debugging
   return (
-    <Dialog open={true} onOpenChange={handleClose}>
+    <Dialog open={isAdminModalOpen} onOpenChange={handleClose}>
       <DialogContent className="slide-in" data-testid="modal-admin-auth">
         <DialogHeader>
           <DialogTitle className="text-center">Admin Access</DialogTitle>

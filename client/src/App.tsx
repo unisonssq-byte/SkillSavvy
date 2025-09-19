@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AdminProvider } from "@/hooks/useAdmin";
+import { EditSessionProvider } from "@/contexts/EditSessionContext";
 import Portfolio from "@/pages/Portfolio";
 import NotFound from "@/pages/not-found";
 
@@ -21,12 +22,14 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AdminProvider>
-        <TooltipProvider>
-          <div className="dark">
-            <Toaster />
-            <Router />
-          </div>
-        </TooltipProvider>
+        <EditSessionProvider>
+          <TooltipProvider>
+            <div className="dark">
+              <Toaster />
+              <Router />
+            </div>
+          </TooltipProvider>
+        </EditSessionProvider>
       </AdminProvider>
     </QueryClientProvider>
   );

@@ -33,6 +33,21 @@ export const blocks = pgTable("blocks", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const media = pgTable("media", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  blockId: varchar("block_id").references(() => blocks.id, { onDelete: "cascade" }),
+  filename: text("filename").notNull(),
+  originalName: text("original_name").notNull(),
+  mimetype: text("mimetype").notNull(),
+  size: integer("size").notNull(),
+  url: text("url").notNull(),
+  thumbnailUrl: text("thumbnail_url"),
+  position: text("position").default("bottom"), // "bottom", "right"
+  order: integer("order").default(0),
+  width: integer("width").default(300), // для изображений справа
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 
 export const sessions = pgTable("sessions", {
   sid: varchar("sid").primaryKey(),
@@ -58,6 +73,14 @@ export const blocksRelations = relations(blocks, ({ one, many }) => ({
   children: many(blocks, {
     relationName: "parent",
   }),
+  media: many(media),
+}));
+
+export const mediaRelations = relations(media, ({ one }) => ({
+  block: one(blocks, {
+    fields: [media.blockId],
+    references: [blocks.id],
+  }),
 }));
 
 
@@ -79,6 +102,14 @@ export const insertBlockSchema = createInsertSchema(blocks).omit({
   updatedAt: true,
 });
 
+export const insertMediaSchema = createInsertSchema(media).omit({
+  id: true,
+  createdAt: true,
+}).extend({
+  position: z.enum(["bottom", "right"]).default("bottom"),
+  width: z.number().min(100).max(800).optional(),
+});
+
 
 // Types
 export type User = typeof users.$inferSelect;
@@ -89,4 +120,7 @@ export type InsertPage = z.infer<typeof insertPageSchema>;
 
 export type Block = typeof blocks.$inferSelect;
 export type InsertBlock = z.infer<typeof insertBlockSchema>;
+
+export type Media = typeof media.$inferSelect;
+export type InsertMedia = z.infer<typeof insertMediaSchema>;
 

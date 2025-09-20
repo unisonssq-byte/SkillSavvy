@@ -11,6 +11,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import ContextMenu, { useContextMenu } from "@/components/ContextMenu";
 import { PendingChangesIndicator } from "@/components/PendingChangesIndicator";
 import { useEditSessionForm } from "@/hooks/useEditSessionForm";
+import MediaUpload from "@/components/MediaUpload";
 import type { Block } from "@shared/schema";
 
 interface TextBlockProps {
@@ -145,19 +146,26 @@ export default function TextBlock({ block, index, isAdmin }: TextBlockProps) {
               data-testid="textarea-block-content"
             />
           </div>
+          <div>
+            <label className="text-sm font-medium">Media</label>
+            <div className="mt-1">
+              <MediaUpload blockId={block.id} isEditing={true} />
+            </div>
+          </div>
         </div>
       ) : (
-        <div>
+        <div className="space-y-4">
           {(content as any).title && (
             <h2 className="text-2xl font-bold mb-4 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
               {(content as any).title}
             </h2>
           )}
           {(content as any).text && (
-            <p className="text-lg text-card-foreground leading-relaxed whitespace-pre-wrap">
+            <p className="text-lg text-card-foreground leading-relaxed whitespace-pre-wrap mb-4">
               {(content as any).text}
             </p>
           )}
+          <MediaUpload blockId={block.id} isEditing={false} />
         </div>
       );
     }

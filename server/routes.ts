@@ -5,7 +5,12 @@ import { WebSocketServer, WebSocket } from "ws";
 import bcrypt from "bcrypt";
 import { storage } from "./storage";
 import { db } from "./db";
-import { insertPageSchema, insertBlockSchema } from "@shared/schema";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+import { exec } from "child_process";
+import { promisify } from "util";
+import { insertPageSchema, insertBlockSchema, insertMediaSchema } from "@shared/schema";
 import { z } from "zod";
 
 // Batch operation schemas
@@ -36,11 +41,59 @@ const batchOperationSchema = z.discriminatedUnion("type", [
     type: z.literal("block_delete"),
     id: z.string(),
   }),
+  z.object({
+    type: z.literal("media_create"),
+    data: insertMediaSchema,
+  }),
+  z.object({
+    type: z.literal("media_delete"),
+    id: z.string(),
+  }),
 ]);
 
 const batchRequestSchema = z.object({
   operations: z.array(batchOperationSchema),
 });
+
+const execAsync = promisify(exec);
+
+// Ensure uploads directory exists
+const uploadsDir = path.join(process.cwd(), "uploads");
+const thumbnailsDir = path.join(uploadsDir, "thumbnails");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+if (!fs.existsSync(thumbnailsDir)) {
+  fs.mkdirSync(thumbnailsDir, { recursive: true });
+}
+
+// Multer configuration for file uploads
+const upload = multer({
+  dest: uploadsDir,
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|mp4|mov|avi|webm|svg/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+    
+    if (mimetype && extname) {
+      return cb(null, true);
+    }
+    cb(new Error("Invalid file type"));
+  },
+});
+
+// Generate video thumbnail
+async function generateVideoThumbnail(videoPath: string, thumbnailPath: string): Promise<void> {
+  try {
+    await execAsync(`ffmpeg -i "${videoPath}" -ss 00:00:01.000 -vframes 1 -q:v 2 "${thumbnailPath}"`);
+  } catch (error) {
+    console.error('Failed to generate thumbnail:', error);
+    throw error;
+  }
+}
 
 
 // Password validation (simulating password.py)
@@ -64,6 +117,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // WebSocket server
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+  
+  // Static file serving for uploads
+  app.use('/uploads', (req, res, next) => {
+    res.header('Cross-Origin-Resource-Policy', 'cross-origin');
+    next();
+  }, express.static(uploadsDir));
   
   wss.on('connection', (ws) => {
     wsConnections.add(ws);
@@ -200,6 +259,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 broadcastEvents.push({
                   type: 'BLOCK_DELETED',
                   payload: { id: operation.id, pageId: blockToDelete.pageId },
+                });
+                break;
+              case 'media_create':
+                result = await storage.createMedia(operation.data, tx);
+                broadcastEvents.push({
+                  type: 'MEDIA_CREATED',
+                  payload: result,
+                });
+                break;
+              case 'media_delete':
+                const mediaDeleted = await storage.deleteMedia(operation.id, tx);
+                if (!mediaDeleted) {
+                  throw new Error(`Media ${operation.id} not found`);
+                }
+                result = { success: true };
+                broadcastEvents.push({
+                  type: 'MEDIA_DELETED',
+                  payload: { id: operation.id },
                 });
                 break;
             }
@@ -410,6 +487,144 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Media upload
+  app.post('/api/upload', verifyAdmin, upload.single('file'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: 'No file uploaded' });
+      }
+
+      const { blockId } = req.body;
+      const file = req.file;
+      const filename = `${Date.now()}-${file.originalname}`;
+      const filepath = path.join(uploadsDir, filename);
+      
+      // Move file to final location
+      fs.renameSync(file.path, filepath);
+      
+      let thumbnailUrl = null;
+      
+      // Generate thumbnail for videos
+      if (file.mimetype.startsWith('video/')) {
+        try {
+          const thumbnailFilename = `thumb_${Date.now()}.jpg`;
+          const thumbnailPath = path.join(thumbnailsDir, thumbnailFilename);
+          await generateVideoThumbnail(filepath, thumbnailPath);
+          thumbnailUrl = `/uploads/thumbnails/${thumbnailFilename}`;
+        } catch (error) {
+          console.error('Failed to generate video thumbnail:', error);
+        }
+      }
+      
+      const media = await storage.createMedia({
+        blockId: blockId || null,
+        filename,
+        originalName: file.originalname,
+        mimetype: file.mimetype,
+        size: file.size,
+        url: `/uploads/${filename}`,
+        thumbnailUrl,
+        position: req.body.position || "bottom",
+        width: req.body.width ? parseInt(req.body.width) : undefined,
+      });
+      
+      // Broadcast media upload
+      broadcastToAll({
+        type: 'MEDIA_UPLOADED',
+        payload: media,
+      });
+      
+      res.json(media);
+    } catch (error) {
+      console.error('Upload error:', error);
+      res.status(500).json({ message: 'Upload failed' });
+    }
+  });
+
+  // Get media for block
+  app.get('/api/blocks/:blockId/media', async (req, res) => {
+    try {
+      const { blockId } = req.params;
+      const media = await storage.getMediaByBlockId(blockId);
+      res.json(media);
+    } catch (error) {
+      res.status(500).json({ message: 'Failed to fetch media' });
+    }
+  });
+
+  // Update media properties (width, position, etc.)
+  app.put('/api/media/:id', verifyAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updates = req.body;
+      
+      const updatedMedia = await storage.updateMedia(id, updates);
+      
+      if (!updatedMedia) {
+        return res.status(404).json({ message: 'Media not found' });
+      }
+      
+      // Broadcast media update
+      broadcastToAll({
+        type: 'MEDIA_UPDATED',
+        payload: updatedMedia,
+      });
+      
+      res.json(updatedMedia);
+    } catch (error) {
+      console.error('Media update error:', error);
+      res.status(500).json({ message: 'Failed to update media' });
+    }
+  });
+
+  // Delete media
+  app.delete('/api/media/:id', verifyAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      
+      const success = await storage.deleteMedia(id);
+      
+      if (!success) {
+        return res.status(404).json({ message: 'Media not found' });
+      }
+      
+      // Broadcast media deletion
+      broadcastToAll({
+        type: 'MEDIA_DELETED',
+        payload: { id },
+      });
+      
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Media deletion error:', error);
+      res.status(500).json({ message: 'Failed to delete media' });
+    }
+  });
+
+  // Reorder media within a block
+  app.patch('/api/blocks/:blockId/media/reorder', verifyAdmin, async (req, res) => {
+    try {
+      const { blockId } = req.params;
+      const { mediaOrderUpdates } = req.body; // Array of { id: string, order: number }
+      
+      if (!Array.isArray(mediaOrderUpdates)) {
+        return res.status(400).json({ message: 'mediaOrderUpdates must be an array' });
+      }
+
+      const updatedMedia = await storage.reorderMedia(blockId, mediaOrderUpdates);
+      
+      // Broadcast media reorder
+      broadcastToAll({
+        type: 'MEDIA_REORDERED',
+        payload: { blockId, media: updatedMedia },
+      });
+      
+      res.json(updatedMedia);
+    } catch (error) {
+      console.error('Media reorder error:', error);
+      res.status(500).json({ message: 'Failed to reorder media' });
+    }
+  });
 
   return httpServer;
 }

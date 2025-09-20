@@ -200,7 +200,7 @@ export default function TextBlock({ block, index, isAdmin }: TextBlockProps) {
         </div>
       )}
       
-      <div className="bg-card rounded-lg p-8 hover-lift relative overflow-hidden">
+      <div className="semi-transparent-card rounded-lg p-8 hover-lift relative overflow-hidden transition-all duration-300">
         {!isEditing ? (
           <>
             {renderContent()}

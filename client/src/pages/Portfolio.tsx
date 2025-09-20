@@ -113,12 +113,20 @@ export default function Portfolio() {
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen animated-gradient-background text-foreground relative">
+      {/* Floating background elements */}
+      <div className="floating-elements">
+        <div className="floating-element"></div>
+        <div className="floating-element"></div>
+        <div className="floating-element"></div>
+        <div className="floating-element"></div>
+        <div className="floating-element"></div>
+      </div>
       {/* Header */}
       <Header pages={pages} currentPageId={currentPageId} />
 
       {/* Main Content */}
-      <main className="pt-24 pb-12">
+      <main className="pt-24 pb-12 relative z-10">
         <div className="max-w-5xl mx-auto px-6">
           <div className="space-y-8 fade-in">
             {blocks

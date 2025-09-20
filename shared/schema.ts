@@ -29,6 +29,8 @@ export const blocks = pgTable("blocks", {
   side: text("side"), // "left", "right", null for main blocks
   content: jsonb("content").notNull(), // flexible content structure
   order: integer("order").default(0),
+  hasRightMedia: boolean("has_right_media").default(false), // есть ли изображения справа
+  rightMediaWidth: integer("right_media_width").default(300), // ширина правых изображений
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -42,7 +44,9 @@ export const media = pgTable("media", {
   size: integer("size").notNull(),
   url: text("url").notNull(),
   thumbnailUrl: text("thumbnail_url"),
+  position: text("position").default("bottom"), // "bottom", "right"
   order: integer("order").default(0),
+  width: integer("width").default(300), // для изображений справа
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -96,11 +100,17 @@ export const insertBlockSchema = createInsertSchema(blocks).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
+}).extend({
+  hasRightMedia: z.boolean().optional(),
+  rightMediaWidth: z.number().min(100).max(800).optional(),
 });
 
 export const insertMediaSchema = createInsertSchema(media).omit({
   id: true,
   createdAt: true,
+}).extend({
+  position: z.enum(["bottom", "right"]).default("bottom"),
+  width: z.number().min(100).max(800).optional(),
 });
 
 // Types

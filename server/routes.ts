@@ -521,6 +521,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         size: file.size,
         url: `/uploads/${filename}`,
         thumbnailUrl,
+        position: req.body.position || "bottom",
+        width: req.body.width ? parseInt(req.body.width) : undefined,
       });
       
       // Broadcast media upload

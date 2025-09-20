@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useAdmin } from "@/hooks/useAdmin";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -6,12 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Edit2, Save, X, Trash2, Copy } from "lucide-react";
+import { Edit2, Save, X, Trash2, Copy, Plus, Move } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import ContextMenu, { useContextMenu } from "@/components/ContextMenu";
 import { PendingChangesIndicator } from "@/components/PendingChangesIndicator";
 import { useEditSessionForm } from "@/hooks/useEditSessionForm";
-import type { Block } from "@shared/schema";
+import type { Block, Media } from "@shared/schema";
 
 interface TextBlockProps {
   block: Block;
@@ -25,6 +25,17 @@ export default function TextBlock({ block, index, isAdmin }: TextBlockProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const { contextMenu, showContextMenu, hideContextMenu } = useContextMenu();
+  const bottomMediaInputRef = useRef<HTMLInputElement>(null);
+  const rightMediaInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch media for this block
+  const { data: allMedia = [] } = useQuery<Media[]>({
+    queryKey: ["/api/blocks", block.id, "media"],
+  });
+
+  // Separate media by position
+  const bottomMedia = allMedia.filter(m => m.position === "bottom");
+  const rightMedia = allMedia.filter(m => m.position === "right");
 
   // Use edit session form for pending changes tracking
   const {
@@ -77,6 +88,66 @@ export default function TextBlock({ block, index, isAdmin }: TextBlockProps) {
     },
   });
 
+  const uploadMediaMutation = useMutation({
+    mutationFn: async ({ file, position, width }: { file: File, position: "bottom" | "right", width?: number }) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('blockId', block.id);
+      formData.append('position', position);
+      if (width) {
+        formData.append('width', width.toString());
+      }
+      
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`,
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error('Upload failed');
+      }
+      
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/blocks", block.id, "media"] });
+      toast({
+        title: "Media uploaded",
+        description: "Your file has been uploaded successfully.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Upload failed",
+        description: "Failed to upload media. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteMediaMutation = useMutation({
+    mutationFn: async (mediaId: string) => {
+      await apiRequest("DELETE", `/api/media/${mediaId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/blocks", block.id, "media"] });
+      toast({
+        title: "Media deleted",
+        description: "The media has been removed successfully.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to delete media. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleSave = () => {
     updateBlockMutation.mutate({
       content: editContent,
@@ -115,6 +186,24 @@ export default function TextBlock({ block, index, isAdmin }: TextBlockProps) {
     if (isAdmin) {
       showContextMenu(e);
     }
+  };
+
+  const handleBottomMediaUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      uploadMediaMutation.mutate({ file, position: "bottom" });
+    }
+  };
+
+  const handleRightMediaUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      uploadMediaMutation.mutate({ file, position: "right", width: 300 });
+    }
+  };
+
+  const handleDeleteMedia = (mediaId: string) => {
+    deleteMediaMutation.mutate(mediaId);
   };
 
   const renderContent = () => {

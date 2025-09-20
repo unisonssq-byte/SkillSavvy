@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { useAdmin } from "@/hooks/useAdmin";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,8 +34,8 @@ export default function TextBlock({ block, index, isAdmin }: TextBlockProps) {
   });
 
   // Separate media by position
-  const bottomMedia = allMedia.filter(m => m.position === "bottom");
-  const rightMedia = allMedia.filter(m => m.position === "right");
+  const bottomMedia = allMedia.filter((m: Media) => m.position === "bottom");
+  const rightMedia = allMedia.filter((m: Media) => m.position === "right");
 
   // Use edit session form for pending changes tracking
   const {
@@ -206,6 +206,19 @@ export default function TextBlock({ block, index, isAdmin }: TextBlockProps) {
     deleteMediaMutation.mutate(mediaId);
   };
 
+  const updateMediaWidth = async (mediaId: string, newWidth: number) => {
+    try {
+      await apiRequest("PUT", `/api/media/${mediaId}`, { width: newWidth });
+      queryClient.invalidateQueries({ queryKey: ["/api/blocks", block.id, "media"] });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to update media width.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const renderContent = () => {
     const content = isEditing ? editContent : block.content;
     
@@ -251,6 +264,109 @@ export default function TextBlock({ block, index, isAdmin }: TextBlockProps) {
     return null;
   };
 
+  const renderRightMedia = () => {
+    if (rightMedia.length === 0) return null;
+
+    return (
+      <div className="space-y-4">
+        {rightMedia.map((item) => (
+          <div key={item.id} className="relative group">
+            <div 
+              className="resize-x overflow-hidden min-w-[100px] max-w-[800px] border-2 border-dashed border-gray-300 rounded-lg"
+              style={{ width: `${item.width || 300}px` }}
+            >
+              {item.mimetype.startsWith('image/') ? (
+                <img
+                  src={item.url}
+                  alt={item.originalName}
+                  className="w-full h-auto rounded-lg"
+                  data-testid={`img-right-media-${item.id}`}
+                />
+              ) : item.mimetype.startsWith('video/') ? (
+                <video
+                  src={item.url}
+                  controls
+                  className="w-full h-auto rounded-lg"
+                  data-testid={`video-right-media-${item.id}`}
+                >
+                  Your browser does not support the video tag.
+                </video>
+              ) : (
+                <div className="p-4 bg-muted rounded-lg">
+                  <p className="text-sm">{item.originalName}</p>
+                </div>
+              )}
+            </div>
+            
+            {/* Media Controls */}
+            {isAdmin && (
+              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="w-8 h-8 p-0"
+                  onClick={() => handleDeleteMedia(item.id)}
+                  data-testid={`button-delete-right-media-${item.id}`}
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderBottomMedia = () => {
+    if (bottomMedia.length === 0) return null;
+
+    return (
+      <div className="space-y-4 mt-6">
+        {bottomMedia.map((item) => (
+          <div key={item.id} className="relative group">
+            {item.mimetype.startsWith('image/') ? (
+              <img
+                src={item.url}
+                alt={item.originalName}
+                className="w-full h-auto rounded-lg"
+                data-testid={`img-bottom-media-${item.id}`}
+              />
+            ) : item.mimetype.startsWith('video/') ? (
+              <video
+                src={item.url}
+                controls
+                className="w-full h-auto rounded-lg"
+                data-testid={`video-bottom-media-${item.id}`}
+              >
+                Your browser does not support the video tag.
+              </video>
+            ) : (
+              <div className="p-4 bg-muted rounded-lg">
+                <p className="text-sm">{item.originalName}</p>
+              </div>
+            )}
+            
+            {/* Media Controls */}
+            {isAdmin && (
+              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="w-8 h-8 p-0"
+                  onClick={() => handleDeleteMedia(item.id)}
+                  data-testid={`button-delete-bottom-media-${item.id}`}
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div 
       className="relative group block-hover" 
@@ -278,7 +394,85 @@ export default function TextBlock({ block, index, isAdmin }: TextBlockProps) {
       )}
       
       <div className="bg-card rounded-lg p-8 hover-lift relative overflow-hidden">
-        {renderContent()}
+        {!isEditing ? (
+          <>
+            {/* Content and Right Media Layout */}
+            <div className="flex gap-8 items-start">
+              {/* Main Text Content */}
+              <div 
+                className="flex-1 relative"
+                style={{ 
+                  maxWidth: rightMedia.length > 0 
+                    ? `calc(100% - ${Math.max(...rightMedia.map(m => m.width || 300)) + 100}px)` 
+                    : '100%' 
+                }}
+              >
+                {renderContent()}
+                
+                {/* Bottom Media Add Button */}
+                {isAdmin && (
+                  <div className="relative mt-4">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-8 h-8 p-0 border-dashed border-2"
+                      onClick={() => bottomMediaInputRef.current?.click()}
+                      disabled={uploadMediaMutation.isPending}
+                      data-testid="button-add-bottom-media"
+                      title="Add image below"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+              
+              {/* Right Media Column */}
+              <div className="relative">
+                {renderRightMedia()}
+                
+                {/* Right Media Add Button */}
+                {isAdmin && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-8 h-8 p-0 border-dashed border-2 mt-2"
+                    onClick={() => rightMediaInputRef.current?.click()}
+                    disabled={uploadMediaMutation.isPending}
+                    data-testid="button-add-right-media"
+                    title="Add image to the right"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </Button>
+                )}
+              </div>
+            </div>
+            
+            {/* Bottom Media - Full Width */}
+            {renderBottomMedia()}
+          </>
+        ) : (
+          /* Edit Mode */
+          renderContent()
+        )}
+        
+        {/* Hidden File Inputs */}
+        <input
+          ref={bottomMediaInputRef}
+          type="file"
+          accept="image/*,video/*"
+          onChange={handleBottomMediaUpload}
+          className="hidden"
+          data-testid="input-bottom-media-upload"
+        />
+        <input
+          ref={rightMediaInputRef}
+          type="file"
+          accept="image/*,video/*"
+          onChange={handleRightMediaUpload}
+          className="hidden"
+          data-testid="input-right-media-upload"
+        />
         
         {/* Edit Mode Controls */}
         {isEditing && (

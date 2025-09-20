@@ -297,6 +297,16 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
+  async updateMedia(id: string, updates: Partial<InsertMedia>, tx?: any): Promise<Media | undefined> {
+    const dbContext = tx || db;
+    const [mediaItem] = await dbContext
+      .update(media)
+      .set(updates)
+      .where(eq(media.id, id))
+      .returning();
+    return mediaItem;
+  }
+
   private async reorderMediaInTransaction(tx: any, blockId: string, mediaOrderUpdates: { id: string; order: number }[]): Promise<Media[]> {
     // Security validation: Verify all media IDs belong to the specified block
     const mediaIds = mediaOrderUpdates.map(update => update.id);
@@ -305,7 +315,7 @@ export class DatabaseStorage implements IStorage {
       .from(media)
       .where(eq(media.blockId, blockId));
     
-    const validMediaIds = new Set(existingMedia.map(m => m.id));
+    const validMediaIds = new Set(existingMedia.map((m: any) => m.id));
     const invalidIds = mediaIds.filter(id => !validMediaIds.has(id));
     
     if (invalidIds.length > 0) {

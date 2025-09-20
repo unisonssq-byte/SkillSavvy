@@ -549,6 +549,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Update media properties (width, position, etc.)
+  app.put('/api/media/:id', verifyAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updates = req.body;
+      
+      const updatedMedia = await storage.updateMedia(id, updates);
+      
+      if (!updatedMedia) {
+        return res.status(404).json({ message: 'Media not found' });
+      }
+      
+      // Broadcast media update
+      broadcastToAll({
+        type: 'MEDIA_UPDATED',
+        payload: updatedMedia,
+      });
+      
+      res.json(updatedMedia);
+    } catch (error) {
+      console.error('Media update error:', error);
+      res.status(500).json({ message: 'Failed to update media' });
+    }
+  });
+
+  // Delete media
+  app.delete('/api/media/:id', verifyAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      
+      const success = await storage.deleteMedia(id);
+      
+      if (!success) {
+        return res.status(404).json({ message: 'Media not found' });
+      }
+      
+      // Broadcast media deletion
+      broadcastToAll({
+        type: 'MEDIA_DELETED',
+        payload: { id },
+      });
+      
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Media deletion error:', error);
+      res.status(500).json({ message: 'Failed to delete media' });
+    }
+  });
+
   // Reorder media within a block
   app.patch('/api/blocks/:blockId/media/reorder', verifyAdmin, async (req, res) => {
     try {

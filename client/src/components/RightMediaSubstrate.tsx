@@ -45,7 +45,7 @@ export default function RightMediaSubstrate({ block, index, isAdmin, allMediaBlo
       const formData = new FormData();
       formData.append('file', file);
       formData.append('blockId', block.id);
-      
+
       const response = await fetch('/api/upload', {
         method: 'POST',
         body: formData,
@@ -53,11 +53,11 @@ export default function RightMediaSubstrate({ block, index, isAdmin, allMediaBlo
           'Authorization': `Bearer ${localStorage.getItem('adminToken')}`,
         },
       });
-      
+
       if (!response.ok) {
         throw new Error('Upload failed');
       }
-      
+
       return response.json();
     },
     onSuccess: () => {
@@ -102,7 +102,7 @@ export default function RightMediaSubstrate({ block, index, isAdmin, allMediaBlo
         id: mediaItem.id,
         order: index,
       }));
-      
+
       return await apiRequest("PATCH", `/api/blocks/${block.id}/media/reorder`, {
         mediaOrderUpdates,
       });

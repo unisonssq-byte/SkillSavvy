@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
 import Header from "@/components/Header";
 import TextBlock from "@/components/TextBlock";
-import RightMediaSubstrate from "@/components/RightMediaSubstrate";
 import AdminAuthModal from "@/components/AdminAuthModal";
 import MediaUploadModal from "@/components/MediaUploadModal";
 import AdminPanel from "@/components/AdminPanel";
@@ -28,7 +27,6 @@ export default function Portfolio() {
   const [showAddBlock, setShowAddBlock] = useState(false);
   const [newBlockType, setNewBlockType] = useState<string>("text");
   const [newBlockContent, setNewBlockContent] = useState<string>("");
-  const [activeMediaBlockId, setActiveMediaBlockId] = useState<string | null>(null);
 
   // Initialize WebSocket connection
   useWebSocket();
@@ -84,23 +82,6 @@ export default function Portfolio() {
     }
   }, [pages, pageSlug]);
 
-  // Manage active media block state
-  useEffect(() => {
-    const mediaBlocks = blocks.filter(block => block.type === 'media' || block.type === 'text_media');
-    
-    if (mediaBlocks.length === 0) {
-      // No media blocks, clear active state
-      setActiveMediaBlockId(null);
-    } else if (!activeMediaBlockId || !mediaBlocks.find(block => block.id === activeMediaBlockId)) {
-      // No active block or current active block is stale, set to first available
-      setActiveMediaBlockId(mediaBlocks[0].id);
-    }
-  }, [blocks, activeMediaBlockId]);
-
-  // Reset active media block when page changes
-  useEffect(() => {
-    setActiveMediaBlockId(null);
-  }, [currentPageId]);
 
   const currentPage = pages.find(p => p.id === currentPageId);
 
@@ -188,21 +169,6 @@ export default function Portfolio() {
         </div>
       </main>
 
-      {/* Single Right Media Substrate - shows media for active block */}
-      {activeMediaBlockId && (() => {
-        const mediaBlocks = blocks.filter(block => block.type === 'media' || block.type === 'text_media');
-        const activeBlock = blocks.find(block => block.id === activeMediaBlockId);
-        return activeBlock ? (
-          <RightMediaSubstrate
-            key={`media-${activeBlock.id}`}
-            block={activeBlock}
-            index={blocks.indexOf(activeBlock)}
-            isAdmin={isAdmin}
-            allMediaBlocks={mediaBlocks}
-            onBlockChange={setActiveMediaBlockId}
-          />
-        ) : null;
-      })()}
 
       {/* Admin Components */}
       <AdminAuthModal />
@@ -224,8 +190,6 @@ export default function Portfolio() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="text">Text Block</SelectItem>
-                  <SelectItem value="media">Media Block</SelectItem>
-                  <SelectItem value="text_media">Text + Media Block</SelectItem>
                 </SelectContent>
               </Select>
             </div>

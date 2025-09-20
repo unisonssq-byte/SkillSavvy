@@ -2,15 +2,12 @@ import {
   users,
   pages,
   blocks,
-  media,
   type User,
   type InsertUser,
   type Page,
   type InsertPage,
   type Block,
   type InsertBlock,
-  type Media,
-  type InsertMedia,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, asc, desc, isNull, and } from "drizzle-orm";
@@ -37,10 +34,6 @@ export interface IStorage {
   updateBlock(id: string, updates: Partial<InsertBlock>, tx?: any): Promise<Block | undefined>;
   deleteBlock(id: string, tx?: any): Promise<boolean>;
   
-  // Media operations
-  getMediaByBlockId(blockId: string): Promise<Media[]>;
-  createMedia(media: InsertMedia, tx?: any): Promise<Media>;
-  deleteMedia(id: string, tx?: any): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -256,87 +249,6 @@ export class DatabaseStorage implements IStorage {
     await tx.delete(blocks).where(eq(blocks.id, id));
   }
 
-  // Media operations
-  async getMediaByBlockId(blockId: string): Promise<Media[]> {
-    return await db.select().from(media)
-      .where(eq(media.blockId, blockId))
-      .orderBy(media.order, media.createdAt);
-  }
-
-  async createMedia(insertMedia: InsertMedia, tx?: any): Promise<Media> {
-    const dbContext = tx || db;
-    const [mediaItem] = await dbContext.insert(media).values(insertMedia).returning();
-    return mediaItem;
-  }
-
-  async deleteMedia(id: string, tx?: any): Promise<boolean> {
-    const dbContext = tx || db;
-    const result = await dbContext.delete(media).where(eq(media.id, id));
-    return (result.rowCount ?? 0) > 0;
-  }
-
-  async updateMediaOrder(id: string, newOrder: number, tx?: any): Promise<Media | undefined> {
-    const dbContext = tx || db;
-    const [mediaItem] = await dbContext
-      .update(media)
-      .set({ order: newOrder })
-      .where(eq(media.id, id))
-      .returning();
-    return mediaItem;
-  }
-
-  async reorderMedia(blockId: string, mediaOrderUpdates: { id: string; order: number }[], tx?: any): Promise<Media[]> {
-    if (tx) {
-      // Use provided transaction
-      return await this.reorderMediaInTransaction(tx, blockId, mediaOrderUpdates);
-    } else {
-      // Create own transaction for atomicity
-      return await db.transaction(async (innerTx) => {
-        return await this.reorderMediaInTransaction(innerTx, blockId, mediaOrderUpdates);
-      });
-    }
-  }
-
-  async updateMedia(id: string, updates: Partial<InsertMedia>, tx?: any): Promise<Media | undefined> {
-    const dbContext = tx || db;
-    const [mediaItem] = await dbContext
-      .update(media)
-      .set(updates)
-      .where(eq(media.id, id))
-      .returning();
-    return mediaItem;
-  }
-
-  private async reorderMediaInTransaction(tx: any, blockId: string, mediaOrderUpdates: { id: string; order: number }[]): Promise<Media[]> {
-    // Security validation: Verify all media IDs belong to the specified block
-    const mediaIds = mediaOrderUpdates.map(update => update.id);
-    const existingMedia = await tx
-      .select({ id: media.id })
-      .from(media)
-      .where(eq(media.blockId, blockId));
-    
-    const validMediaIds = new Set(existingMedia.map((m: any) => m.id));
-    const invalidIds = mediaIds.filter(id => !validMediaIds.has(id));
-    
-    if (invalidIds.length > 0) {
-      throw new Error(`Media IDs do not belong to block ${blockId}: ${invalidIds.join(', ')}`);
-    }
-    
-    // Update each media item's order atomically
-    for (const update of mediaOrderUpdates) {
-      await tx
-        .update(media)
-        .set({ order: update.order })
-        .where(eq(media.id, update.id));
-    }
-    
-    // Return the updated media list using the same transaction
-    return await tx
-      .select()
-      .from(media)
-      .where(eq(media.blockId, blockId))
-      .orderBy(asc(media.order), asc(media.createdAt));
-  }
 }
 
 export const storage = new DatabaseStorage();

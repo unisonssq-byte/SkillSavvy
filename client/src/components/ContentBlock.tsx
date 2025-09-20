@@ -9,7 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Edit2, Plus, Save, X, Trash2, Copy } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import ContextMenu, { useContextMenu } from "@/components/ContextMenu";
-import type { Block, Media } from "@shared/schema";
+import type { Block } from "@shared/schema";
 
 interface ContentBlockProps {
   block: Block;
@@ -23,16 +23,8 @@ export default function ContentBlock({ block, index, isAdmin }: ContentBlockProp
   const [isEditing, setIsEditing] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [editContent, setEditContent] = useState(block.content);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const rightMediaInputRef = useRef<HTMLInputElement>(null);
   const { contextMenu, showContextMenu, hideContextMenu } = useContextMenu();
-  const [draggedMediaId, setDraggedMediaId] = useState<string | null>(null);
-  const [rightSideMedia, setRightSideMedia] = useState<Media[]>([]);
 
-  // Fetch media for this block
-  const { data: media = [] } = useQuery<Media[]>({
-    queryKey: ["/api/blocks", block.id, "media"],
-  });
 
   const updateBlockMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -76,41 +68,6 @@ export default function ContentBlock({ block, index, isAdmin }: ContentBlockProp
     },
   });
 
-  const uploadMediaMutation = useMutation({
-    mutationFn: async (file: File) => {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('blockId', block.id);
-      
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`,
-        },
-      });
-      
-      if (!response.ok) {
-        throw new Error('Upload failed');
-      }
-      
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/blocks", block.id, "media"] });
-      toast({
-        title: "Media uploaded",
-        description: "Your file has been uploaded successfully.",
-      });
-    },
-    onError: () => {
-      toast({
-        title: "Upload failed",
-        description: "Failed to upload media. Please try again.",
-        variant: "destructive",
-      });
-    },
-  });
 
   const handleSave = () => {
     updateBlockMutation.mutate({
@@ -127,12 +84,6 @@ export default function ContentBlock({ block, index, isAdmin }: ContentBlockProp
     deleteBlockMutation.mutate();
   };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      uploadMediaMutation.mutate(file);
-    }
-  };
 
   const handleCopyBlock = async () => {
     try {
@@ -159,26 +110,6 @@ export default function ContentBlock({ block, index, isAdmin }: ContentBlockProp
     }
   };
 
-  const handleRightMediaUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      uploadMediaMutation.mutate(file);
-    }
-  };
-
-  const handleMediaDragStart = (e: React.DragEvent, mediaId: string) => {
-    setDraggedMediaId(mediaId);
-    e.dataTransfer.setData('text/plain', mediaId);
-  };
-
-  const handleMediaDragEnd = () => {
-    setDraggedMediaId(null);
-  };
-
-  const handleMediaDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    // Здесь будет логика для изменения позиции медиа
-  };
 
   const renderContent = () => {
     const content = isEditing ? editContent : block.content;
@@ -225,41 +156,6 @@ export default function ContentBlock({ block, index, isAdmin }: ContentBlockProp
     return null;
   };
 
-  const renderMedia = () => {
-    if (media.length === 0) return null;
-
-    return (
-      <div className="relative">
-        <div className="grid gap-4">
-          {media.map((item) => (
-            <div key={item.id} className="relative">
-              {item.mimetype.startsWith('image/') ? (
-                <img
-                  src={item.url}
-                  alt={item.originalName}
-                  className="rounded-lg max-w-full h-auto"
-                  data-testid={`img-media-${item.id}`}
-                />
-              ) : item.mimetype.startsWith('video/') ? (
-                <video
-                  src={item.url}
-                  controls
-                  className="rounded-lg max-w-full h-auto"
-                  data-testid={`video-media-${item.id}`}
-                >
-                  Your browser does not support the video tag.
-                </video>
-              ) : (
-                <div className="p-4 bg-muted rounded-lg">
-                  <p className="text-sm">{item.originalName}</p>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
 
   return (
     <div 
@@ -282,38 +178,8 @@ export default function ContentBlock({ block, index, isAdmin }: ContentBlockProp
       
       <div className="bg-card rounded-lg p-8 hover-lift relative overflow-hidden">
         {block.type === "text" && (
-          <div className="flex items-start space-x-8">
-            <div className="flex-1">
-              {renderContent()}
-            </div>
-            
-            {/* Media Area */}
-            <div className="relative">
-              {renderMedia()}
-              
-              {/* Add Media Button */}
-              {isAdmin && (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="absolute top-4 -right-2 w-8 h-8 add-media-btn"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploadMediaMutation.isPending}
-                  data-testid="button-add-media"
-                >
-                  <Plus className="w-4 h-4" />
-                </Button>
-              )}
-              
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*,video/*"
-                onChange={handleFileUpload}
-                className="hidden"
-                data-testid="input-file-upload"
-              />
-            </div>
+          <div className="flex-1">
+            {renderContent()}
           </div>
         )}
         
